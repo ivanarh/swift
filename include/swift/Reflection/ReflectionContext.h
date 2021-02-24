@@ -145,6 +145,8 @@ public:
       auto CmdBuf = this->getReader().readBytes(
           RemoteAddress(CmdStartAddress.getAddressData() + Offset),
           SegmentCmdHdrSize);
+      if (!CmdBuf)
+        return false;
       auto CmdHdr = reinterpret_cast<typename T::SegmentCmd *>(CmdBuf.get());
       if (strncmp(CmdHdr->segname, "__TEXT", sizeof(CmdHdr->segname)) == 0) {
         Command = CmdHdr;
@@ -165,6 +167,8 @@ public:
     auto LoadCmdAddress = reinterpret_cast<const char *>(loadCmdOffset);
     auto LoadCmdBuf = this->getReader().readBytes(
         RemoteAddress(LoadCmdAddress), sizeof(typename T::SegmentCmd));
+    if (!LoadCmdBuf)
+      return false;
     auto LoadCmd = reinterpret_cast<typename T::SegmentCmd *>(LoadCmdBuf.get());
 
     // The sections start immediately after the load command.
@@ -173,6 +177,8 @@ public:
                        sizeof(typename T::SegmentCmd);
     auto Sections = this->getReader().readBytes(
         RemoteAddress(SectAddress), NumSect * sizeof(typename T::Section));
+    if (!Sections)
+      return false;
 
     auto Slide = ImageStart.getAddressData() - Command->vmaddr;
     std::string Prefix = "__swift5";
@@ -203,6 +209,8 @@ public:
 
     auto SectBuf = this->getReader().readBytes(RemoteAddress(RangeStart),
                                                RangeEnd - RangeStart);
+    if (!SectBuf)
+      return false;
 
     auto findMachOSectionByName = [&](std::string Name)
         -> std::pair<RemoteRef<void>, uint64_t> {
@@ -252,6 +260,8 @@ public:
       auto CmdBuf = this->getReader().readBytes(
           RemoteAddress(CmdStartAddress.getAddressData() + Offset),
           SegmentCmdHdrSize);
+      if (!CmdBuf)
+        return false;
       auto CmdHdr = reinterpret_cast<typename T::SegmentCmd *>(CmdBuf.get());
       if (strncmp(CmdHdr->segname, "__DATA", sizeof(CmdHdr->segname)) == 0) {
         auto DataSegmentEnd =
@@ -274,6 +284,8 @@ public:
   bool readPECOFFSections(RemoteAddress ImageStart) {
     auto DOSHdrBuf = this->getReader().readBytes(
         ImageStart, sizeof(llvm::object::dos_header));
+    if (!DOSHdrBuf)
+      return false;
     auto DOSHdr =
         reinterpret_cast<const llvm::object::dos_header *>(DOSHdrBuf.get());
     auto COFFFileHdrAddr = ImageStart.getAddressData() +
@@ -282,6 +294,8 @@ public:
 
     auto COFFFileHdrBuf = this->getReader().readBytes(
         RemoteAddress(COFFFileHdrAddr), sizeof(llvm::object::coff_file_header));
+    if (!COFFFileHdrBuf)
+      return false;
     auto COFFFileHdr = reinterpret_cast<const llvm::object::coff_file_header *>(
         COFFFileHdrBuf.get());
 
@@ -291,9 +305,11 @@ public:
     auto SectionTableBuf = this->getReader().readBytes(
         RemoteAddress(SectionTableAddr),
         sizeof(llvm::object::coff_section) * COFFFileHdr->NumberOfSections);
+    if (!SectionTableBuf)
+      return false;
 
-    auto findCOFFSectionByName = [&](llvm::StringRef Name)
-        -> std::pair<RemoteRef<void>, uint64_t> {
+    auto findCOFFSectionByName =
+        [&](llvm::StringRef Name) -> std::pair<RemoteRef<void>, uint64_t> {
       for (size_t i = 0; i < COFFFileHdr->NumberOfSections; ++i) {
         const llvm::object::coff_section *COFFSec =
             reinterpret_cast<const llvm::object::coff_section *>(
@@ -308,6 +324,8 @@ public:
         auto Addr = ImageStart.getAddressData() + COFFSec->VirtualAddress;
         auto Buf = this->getReader().readBytes(RemoteAddress(Addr),
                                                COFFSec->VirtualSize);
+        if (!Buf)
+          return {nullptr, 0};
         auto BufStart = Buf.get();
         savedBuffers.push_back(std::move(Buf));
 
@@ -377,6 +395,8 @@ public:
   template <typename T> bool readELFSections(RemoteAddress ImageStart) {
     auto Buf =
         this->getReader().readBytes(ImageStart, sizeof(typename T::Header));
+    if (!Buf)
+      return false;
 
     auto Hdr = reinterpret_cast<const typename T::Header *>(Buf.get());
     assert(Hdr->getFileClass() == T::ELFClass && "invalid ELF file class");
@@ -418,6 +438,8 @@ public:
     auto StrTabStart =
         RemoteAddress(ImageStart.getAddressData() + StrTabOffset);
     auto StrTabBuf = this->getReader().readBytes(StrTabStart, StrTabSize);
+    if (!StrTabBuf)
+      return false;
     auto StrTab = reinterpret_cast<const char *>(StrTabBuf.get());
 
     auto findELFSectionByName = [&](std::string Name)
@@ -432,6 +454,8 @@ public:
             RemoteAddress(ImageStart.getAddressData() + Hdr->sh_addr);
         auto SecSize = Hdr->sh_size;
         auto SecBuf = this->getReader().readBytes(SecStart, SecSize);
+        if (!SecBuf)
+          return {nullptr, 0};
         auto SecContents = RemoteRef<void>(SecStart.getAddressData(),
                                            SecBuf.get());
         savedBuffers.push_back(std::move(SecBuf));
@@ -474,6 +498,8 @@ public:
   bool readELF(RemoteAddress ImageStart) {
     auto Buf =
         this->getReader().readBytes(ImageStart, sizeof(llvm::ELF::Elf64_Ehdr));
+    if (!Buf)
+      return false;
 
     // Read the header.
     auto Hdr = reinterpret_cast<const llvm::ELF::Elf64_Ehdr *>(Buf.get());
